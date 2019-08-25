@@ -1,5 +1,6 @@
 # keras-addition
-Deep neural network architecture MLP and LSTM to perform the mathematical linear sum function using keras and tensorflow backend. The code is implemented in python3. 
+
+Deep neural network architecture MLP and LSTM to perform the mathematical linear sum function. 
 
 This project requires Python3, Keras, Tensorflow, and sklearn.
 
