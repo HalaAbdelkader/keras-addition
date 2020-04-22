@@ -24,6 +24,7 @@ import tensorflow as tf
 from keras import backend as K
 from sklearn.metrics import mean_squared_error, mean_absolute_error, accuracy_score
 from data_generation import convert_num_to_str, encode_chars_to_integers, one_hot_encode, invert_encoding
+from hellinger_distance import get_training_samples, hellinger_distance
 
 
 # fix the data generation seed for reproducibility
@@ -39,7 +40,7 @@ sess = tf.Session(graph=tf.get_default_graph(), config=session_conf)
 K.set_session(sess)
 
 
-def generate_encode_dataset(n_samples, lower_bound, upper_bound, vocab, in_max_len, out_max_len, max_features=10,
+def generate_encode_dataset(n_samples, lower_bound, upper_bound, vocab, in_max_len, out_max_len, max_features=5,
                             data_type='integers'):
     """
        the main method for the variable length random dataset generation and encoding
@@ -61,8 +62,7 @@ def generate_encode_dataset(n_samples, lower_bound, upper_bound, vocab, in_max_l
     if data_type == 'neg':
         if not os.path.exists('lstm_negative_dataset.txt') and not os.path.exists('lstm_negative_dataset_labels.txt'):
             for i in range(n_samples):
-                n_features = random.randint(2, max_features)
-                input_seq = [random.randint(lower_bound, upper_bound) for _ in range(n_features)]
+                input_seq = [random.randint(lower_bound, upper_bound) for _ in range(max_features)]
                 output_seq = np.sum(input_seq)
                 input.append(input_seq)
                 target.append(output_seq)
@@ -77,23 +77,21 @@ def generate_encode_dataset(n_samples, lower_bound, upper_bound, vocab, in_max_l
     elif data_type == 'floating point':
         if not os.path.exists('lstm_float_dataset.txt') and not os.path.exists('lstm_float_dataset_labels.txt'):
             for i in range(n_samples):
-                n_features = random.randint(2, max_features)
-                input_seq = [np.random.uniform(lower_bound, upper_bound) for _ in range(n_features)]
+                input_seq = np.round([np.random.uniform(lower_bound, upper_bound) for _ in range(max_features)], 4)
                 output_seq = np.sum(input_seq)
                 input.append(input_seq)
                 target.append(output_seq)
             # convert inputs and targets to strings of characters
             input, target = convert_num_to_str(input, target)
             np.savetxt('lstm_float_dataset.txt', input, fmt="%s")
-            np.savetxt('stm_float_dataset_labels.txt', target, fmt="%s")
+            np.savetxt('lstm_float_dataset_labels.txt', target, fmt="%s")
         else:
             input = np.loadtxt('lstm_float_dataset.txt', dtype='str')
             target = np.loadtxt('lstm_float_dataset_labels.txt', dtype='str')
     else:
         if not os.path.exists('lstm_positive_dataset.txt') and not os.path.exists('lstm_positive_dataset_labels.txt'):
             for i in range(n_samples):
-                n_features = random.randint(2, max_features)
-                input_seq = [random.randint(lower_bound, upper_bound) for _ in range(n_features)]
+                input_seq = [random.randint(lower_bound, upper_bound) for _ in range(max_features)]
                 output_seq = np.sum(input_seq)
                 input.append(input_seq)
                 target.append(output_seq)
@@ -110,26 +108,10 @@ def generate_encode_dataset(n_samples, lower_bound, upper_bound, vocab, in_max_l
 
     # vectorisation using one-hot encoding of the indexed integers
     input, target = one_hot_encode(input, target, len(vocab))
-
     input = np.array(input)
     target = np.array(target)
 
     return input, target
-
-
-def hellinger_distance(vec1, vec2):
-    """
-    a helper function that calculate Hellinger distance between two probability distributions.
-    :param vec1: numpy.ndarray distribution vector
-    :param vec2: numpy.ndarray distribution vector
-    :return:  float Hellinger distance between `vec1` and `vec2`
-    Value in range [0, 1], where 0 is min distance (max similarity) and 1 is max distance (min similarity).
-    """
-    # normalize the datasets
-    vec1 = vec1/100.0
-    vec2 = vec2/100.0
-    sim = np.sqrt(0.5 * ((np.sqrt(vec1) - np.sqrt(vec2))**2).sum())
-    return sim
 
 
 def main():
@@ -141,7 +123,7 @@ def main():
     in_seq_length = 40
     out_seq_length = 4
     n_samples_test = 100
-    xdataset = []
+    n_features = 5
 
     # create LSTM
     print('==> creating LSTM model')
@@ -154,12 +136,12 @@ def main():
     print(model.summary())
 
     print('==> loading LSTM model weights')
-    model.load_weights('lstm_update_best_model_kf_4.h5')
+    model.load_weights('lstm_best_model.h5')
 
     print('==> sampling a test dataset of {} samples.'.format(n_samples_test))
-
+    #  data_type='neg'
     xtest, ytest = generate_encode_dataset(n_samples_test, lower_bound, upper_bound, vocab, in_seq_length,
-                                           out_seq_length)
+                                           out_seq_length) #data_type='floating point')
 
     # evaluate on the test dataset
     result = model.predict(xtest, verbose=0)
@@ -167,30 +149,23 @@ def main():
     expected = [invert_encoding(y, vocab) for y in ytest]
     predicted = [invert_encoding(ypred, vocab) for ypred in result]
 
-    expected = np.array(expected).astype(int)
-    predicted = np.array(predicted).astype(int)
+    expected = np.array(expected).astype(float)
+    predicted = np.array(predicted).astype(float)
 
     rmse = np.sqrt(mean_squared_error(expected, predicted))
     mae = mean_absolute_error(expected, predicted)
     std = np.std(np.abs(expected - predicted))
-
+    print(type(expected))
     print('=> LSTM model results')
     print('=> LSTM: RMSE: {:.6f}, MAE: {:.6f}, STD: {:.6f}'.format(rmse, mae, std))
-    print('=> LSTM: Target Prediction Acc: {}'.format(accuracy_score(expected, predicted)))
+    print('=> LSTM: Target Prediction Acc: {}'.format(accuracy_score(np.round(expected), predicted)))
 
     # show some predictions
     print('=> sample model predictions')
     for i in range(10):
         print('Target: {}, Prediction: {}'.format(expected[i], predicted[i]))
 
-    training_dataset = []
     test_dataset = []
-    # calculate Hellinger distance
-    xdataset = np.loadtxt('lstm_xdataset.txt', dtype='str')
-    for x in xdataset:
-        x = x.split('+')
-        x = np.array(x, dtype=float)
-        training_dataset.append(x)
 
     for x in xtest:
         x = invert_encoding(x, vocab)
@@ -198,7 +173,8 @@ def main():
         x = np.array(x, dtype=float)
         test_dataset.append(x)
 
-    print("Hellinger distance: ", hellinger_distance(np.array(training_dataset[0]), np.array([72, 97, 8, 32])))
+    xdataset, y = get_training_samples(n_features, n_samples_test, upper_bound)
+    print("Hellinger distance: ", hellinger_distance(np.array(xdataset), np.array(test_dataset), lower_bound))
 
 
 # code starting point
